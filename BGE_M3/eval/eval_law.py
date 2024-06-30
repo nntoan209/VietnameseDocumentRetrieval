@@ -109,9 +109,9 @@ if __name__ == "__main__":
 
     converted_results = {}
     for idx, result in enumerate(results_dense_search):
-            for answer in result:
-                answer['corpus_id'] = pids[answer['corpus_id']]
-            converted_results[qids[idx]] = result
+        for answer in result:
+            answer['corpus_id'] = pids[answer['corpus_id']]
+        converted_results[qids[idx]] = result
     for qid, result in converted_results.items():
         only_pidqids_results[qid] = [answer['corpus_id'].strip() for answer in result]
         
