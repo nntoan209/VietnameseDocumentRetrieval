@@ -1,0 +1,14 @@
+transformers==4.16.1
+sentence-transformers
+scipy
+datasets
+accelerate>=0.20.1
+pandas
+scikit-learn
+prettytable
+gradio
+setuptools
+sentencepiece
+deepspeed
+rank-bm25
+underthesea

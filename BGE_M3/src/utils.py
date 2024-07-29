@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer, AutoModel, is_torch_npu_available
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, is_torch_npu_available
 import torch
 from typing import *
 from collections import defaultdict
@@ -386,3 +386,81 @@ class BGEM3FlagModel:
             )
 
         return batch_colbert_score
+    
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+class FlagReranker:
+    def __init__(
+            self,
+            model_name_or_path: str = None,
+            use_fp16: bool = False,
+            cache_dir: str = None,
+            device: Union[str, int] = None
+    ) -> None:
+
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, cache_dir=cache_dir)
+        self.model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, cache_dir=cache_dir)
+
+        if device and isinstance(device, str):
+            self.device = torch.device(device)
+            if device == 'cpu':
+                use_fp16 = False
+        else:
+            if torch.cuda.is_available():
+                if device is not None:
+                    self.device = torch.device(f"cuda:{device}")
+                else:
+                    self.device = torch.device("cuda")
+            elif torch.backends.mps.is_available():
+                self.device = torch.device("mps")
+            elif is_torch_npu_available():
+                self.device = torch.device("npu")
+            else:
+                self.device = torch.device("cpu")
+                use_fp16 = False
+        if use_fp16:
+            self.model.half()
+
+        self.model = self.model.to(self.device)
+
+        self.model.eval()
+
+        if device is None:
+            self.num_gpus = torch.cuda.device_count()
+            if self.num_gpus > 1:
+                print(f"----------using {self.num_gpus}*GPUs----------")
+                self.model = torch.nn.DataParallel(self.model)
+        else:
+            self.num_gpus = 1
+
+    @torch.no_grad()
+    def compute_score(self, sentence_pairs: Union[List[Tuple[str, str]], Tuple[str, str]], batch_size: int = 256,
+                      max_length: int = 512, normalize: bool = False) -> List[float]:
+        if self.num_gpus > 0:
+            batch_size = batch_size * self.num_gpus
+
+        assert isinstance(sentence_pairs, list)
+        if isinstance(sentence_pairs[0], str):
+            sentence_pairs = [sentence_pairs]
+
+        all_scores = []
+        for start_index in tqdm(range(0, len(sentence_pairs), batch_size), desc="Compute Scores",
+                                disable=len(sentence_pairs) < 128):
+            sentences_batch = sentence_pairs[start_index:start_index + batch_size]
+            inputs = self.tokenizer(
+                sentences_batch,
+                padding=True,
+                truncation=True,
+                return_tensors='pt',
+                max_length=max_length,
+            ).to(self.device)
+
+            scores = self.model(**inputs, return_dict=True).logits.view(-1, ).float()
+            all_scores.extend(scores.cpu().numpy().tolist())
+
+        if normalize:
+            all_scores = [sigmoid(score) for score in all_scores]
+
+        return all_scores

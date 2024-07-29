@@ -1,4 +1,4 @@
-# Vietnamese Document Retrieval
+# Legal Retrieval
 
 ## 1. Install requirements
 ```
@@ -41,7 +41,7 @@ python3 BGE_M3/process_data/split_by_length.py \
     --output_dir data/sft/train_data_minedHN_splitted \
     --cache_dir ./cache \
     --log_name .split_log \
-    --length_list 0 512 1024 2048 3072 4096 5120 6144 7168 \
+    --length_list 0 512 1024 2048 \
     --model_name_or_path BAAI/bge-m3 \
     --num_proc 32 \
     "$@"
@@ -52,7 +52,11 @@ Change the arguments and run
 bash BGE_M3/script/process_data/split_by_length.sh
 ```
 
-Refer to [Train dataset](https://huggingface.co/datasets/nntoan209/LawFinetuneV2) and [Eval dataset](https://huggingface.co/datasets/nntoan209/LawEval) for example train and eval dataset
+Reference datasets:
+- [Train Dataset](https://huggingface.co/datasets/nntoan209/TrainData-CrossLingual/tree/main) (All 4 datasets combined)
+- [Law Eval Dataset](https://huggingface.co/datasets/nntoan209/LawEval-CrossLingual)
+- [Zalo Legal 2021 Eval Dataset](nntoan209/ZaloLegal-CrossLingual)
+- [Zalo QA Eval Dataset](https://huggingface.co/datasets/nntoan209/ZaloQA-CrossLingual)
 
 Script to download eval dataset:
 ```
@@ -86,7 +90,16 @@ bash BGE_M3/script/train/train_crosslingual.sh
 ```
 Most of the arguments are the same when training for Vietnamese only. The differences are in the dataset file. For cross-lingual training, the ```--train_data``` file contains the ids of the queries and documents, and there are 4 additional files: ```merged_queries_vi```, ```merged_queries_en```, ```merged_corpus_vi``` and ```merged_queries_en``` which are json files, the keys are the ids, and the values are the texts.
 
+
+### Cross-encoder Reranker:
+```
+bash BGE_M3/script/train/finetune_reranker.sh
+```
+Additional argument: ```--use_bce_loss```: whether to use BCE loss instead of Cross Entropy loss as the original model.
+
 ## 4. Evaluation
+
+### Rerank using Multi-vector (ColBERT) mode of BGE-M3
 
 ```
 bash BGE_M3/script/eval/eval_law.sh
@@ -105,3 +118,13 @@ We also provided the script to run the evaluation for cross-lingual retrieval, w
 ```
 bash BGE_M3/script/eval/run_eval.sh
 ```
+
+### Rerank using a Cross-encoder
+
+```
+bash BGE_M3/script/eval/eval_law_ce.sh
+```
+
+Additional arguments:
+- ```ce_rerank```: whether to use a cross-encoder for reranking
+- ```ce_rerank_model```: path to the Huggingface model or the local saved model when training.

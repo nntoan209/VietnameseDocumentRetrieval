@@ -1,4 +1,4 @@
-from BGE_M3.src.utils import BGEM3FlagModel
+from BGE_M3.src.utils import BGEM3FlagModel, FlagReranker
 from BGE_M3.process_data.utils import bm25_tokenizer
 from rank_bm25 import BM25Plus
 import numpy as np
@@ -35,6 +35,8 @@ parser.add_argument("--rrf_k", type=int, default=10, help="k smoothing parameter
 
 parser.add_argument("--colbert_rerank", action='store_true', help="rerank with colbert")
 parser.add_argument("--top_k_rerank", type=int, default=100, help="number of passages to retrieve for reranking")
+parser.add_argument("--ce_rerank", action="store_true", help="rerank with cross-encoder")
+parser.add_argument("--ce_rerank_model", type=str, default="nntoan209/bgem3-reranker", help="cross-encoder model for reranking")
 
 parser.add_argument("--save_dir", type=str)
 
@@ -46,6 +48,11 @@ if __name__ == "__main__":
     if args.corpus_embeddings is None:
         assert args.model_savedir is not None, "model_savedir should be provided if corpus_embeddings is not provided"
 
+    dataset_name = args.corpus_file.split("/")[2]
+    is_corpus_chunked = "chunk" in args.corpus_file
+    print("Dataset name:", dataset_name)
+    print("Corpus chunked: ", is_corpus_chunked)
+    
     corpus = json.load(open(args.corpus_file, encoding='utf-8'))
     dev_queries = json.load(open(args.dev_queries_file, encoding='utf-8'))
     dev_rel_docs = json.load(open(args.dev_rel_docs_file, encoding='utf-8'))
@@ -86,11 +93,11 @@ if __name__ == "__main__":
                                         return_colbert_vecs=False)
         if args.save_corpus_embeddings:
             print("Saving documents dense embeddings ...")
-            os.makedirs(f"saved_embeddings/{args.model_savedir}", exist_ok=True)
+            os.makedirs(f"saved_embeddings/{dataset_name}/{args.model_savedir}", exist_ok=True)
             if args.corpus_file.split(".")[0].endswith("_en"):
-                np.save(f"saved_embeddings/{args.model_savedir}/corpus_embedding_en.npy", sentences_embedding["dense_vecs"])
+                np.save(f"saved_embeddings/{dataset_name}/{args.model_savedir}/corpus_embedding_en.npy", sentences_embedding["dense_vecs"])
             else:
-                np.save(f"saved_embeddings/{args.model_savedir}/corpus_embedding.npy", sentences_embedding["dense_vecs"])
+                np.save(f"saved_embeddings/{dataset_name}/{args.model_savedir}/corpus_embedding.npy", sentences_embedding["dense_vecs"])
     else:
         # Load the saved corpus embeddings
         print("Loading documents dense embeddings ...")
@@ -99,6 +106,11 @@ if __name__ == "__main__":
     only_pidqids_results = {}
     hybrid_only_pidqids_results = {}
     rerank_only_pidqids_results = {}
+    
+    if is_corpus_chunked:
+        only_pidqids_results_chunk = {}
+        hybrid_only_pidqids_results_chunk = {}
+        rerank_only_pidqids_results_chunk = {}
 
     # Dense retrieval, using sentence_transformers semantic_search function.
     # This function requires float32 tensors as input
@@ -109,11 +121,20 @@ if __name__ == "__main__":
 
     converted_results = {}
     for idx, result in enumerate(results_dense_search):
-        for answer in result:
-            answer['corpus_id'] = pids[answer['corpus_id']]
-        converted_results[qids[idx]] = result
+            for answer in result:
+                answer['corpus_id'] = pids[answer['corpus_id']]
+            converted_results[qids[idx]] = result
     for qid, result in converted_results.items():
-        only_pidqids_results[qid] = [answer['corpus_id'].strip() for answer in result]
+        only_pidqids_results[qid] = [answer['corpus_id'] for answer in result]
+        
+        if is_corpus_chunked:
+            final_list = []
+            for a in ["_".join(answer['corpus_id'].strip().split("_")[:-1]) for answer in result]:
+                if a not in final_list:
+                    final_list.append(a)
+                else:
+                    final_list.append("already_exist")
+            only_pidqids_results_chunk[qid] = final_list
         
 
     if args.bm25_hybrid: # Hybrid retrieval with dense and sparse
@@ -125,9 +146,9 @@ if __name__ == "__main__":
         dense_scores = model.dense_score(q_reps=queries_dev_embedding_dense, p_reps=sentences_embedding_dense)
         
         # Train the BM25 model
-        if os.path.exists(f'saved_models/zalo_legal/bm25_{args.bm25_k1}_{args.bm25_b}'):
+        if os.path.exists(f'saved_models/{dataset_name}/bm25_{args.bm25_k1}_{args.bm25_b}'):
             print("Loading BM25 model ...")
-            with open(f'saved_models/zalo_legal/bm25_{args.bm25_k1}_{args.bm25_b}', 'rb') as bm25result_file:
+            with open(f'saved_models/{dataset_name}/bm25_{args.bm25_k1}_{args.bm25_b}', 'rb') as bm25result_file:
                 bm25 = pickle.load(bm25result_file)
         else:
             print("Fitting BM25 model ...")
@@ -136,13 +157,13 @@ if __name__ == "__main__":
                             k1=args.bm25_k1,
                             b=args.bm25_b)
             print("Saving BM25 model ...")
-            with open(f'saved_models/zalo_legal/bm25_{args.bm25_k1}_{args.bm25_b}', 'wb') as bm25result_file:
+            with open(f'saved_models/{dataset_name}/bm25_{args.bm25_k1}_{args.bm25_b}', 'wb') as bm25result_file:
                 pickle.dump(bm25, bm25result_file)
                 
         # Calculate the BM25 scores
-        if os.path.exists(f'saved_models/zalo_legal/bm25_score_{args.bm25_k1}_{args.bm25_b}.npy'):
+        if os.path.exists(f'saved_models/{dataset_name}/bm25_score_{args.bm25_k1}_{args.bm25_b}.npy'):
             print("Loading BM25 scores ...")
-            sparse_scores = np.load(f'saved_models/zalo_legal/bm25_score_{args.bm25_k1}_{args.bm25_b}.npy')
+            sparse_scores = np.load(f'saved_models/{dataset_name}/bm25_score_{args.bm25_k1}_{args.bm25_b}.npy')
         else:
             print("Calculating BM25 scores ...")
             queries_split_size = 100
@@ -193,8 +214,41 @@ if __name__ == "__main__":
             # Get the pids only
             rerank_only_pidqids_results[qid] = [answer[0] for answer in rerank_pids_with_colbert_scores_for_qid]
             
+            if is_corpus_chunked:
+                final_list = []
+                for a in ["_".join(answer[0].strip().split("_")[:-1]) for answer in rerank_pids_with_colbert_scores_for_qid]:
+                    if a not in final_list:
+                        final_list.append(a)
+                    else:
+                        final_list.append("already_exist")
+                rerank_only_pidqids_results_chunk[qid] = final_list
+            
+    if args.ce_rerank:
+        if args.bm25_hybrid:
+            only_pidqids_to_rerank = hybrid_only_pidqids_results
+        else:
+            only_pidqids_to_rerank = only_pidqids_results
+            
+        reranker = FlagReranker(args.ce_rerank_model,
+                                use_fp16=True,
+                                device=None)
+        
+        for qid, pids_ in tqdm(only_pidqids_to_rerank.items(), desc="Rerank with Cross-encoder"):
+            colbert_scores_for_qid = reranker.compute_score([[dev_queries[qid], corpus[pid]] for pid in pids_],
+                                                            batch_size=args.passage_batch_size,
+                                                            max_length=args.passage_max_length,
+                                                            normalize=True)
+        
+            # Sort the pair (pid, colbert_score) in descending order based on the colbert_score
+            pids_with_colbert_scores_for_qid = list(zip(only_pidqids_to_rerank[qid], colbert_scores_for_qid))
+            rerank_pids_with_colbert_scores_for_qid = sorted(pids_with_colbert_scores_for_qid, key=lambda x: x[1], reverse=True)
+
+            # Get the pids only
+            rerank_only_pidqids_results[qid] = [answer[0] for answer in rerank_pids_with_colbert_scores_for_qid]
+                
+        
     ### Calculate and write metrics
-    metrics = calculate_metrics(queries_result_list=only_pidqids_results,
+    metrics = calculate_metrics(queries_result_list=only_pidqids_results if not is_corpus_chunked else only_pidqids_results_chunk,
                                 queries=dev_queries,
                                 relevant_docs=dev_rel_docs,
                                 mrr_at_k=mrr_at_k,
@@ -213,8 +267,8 @@ if __name__ == "__main__":
                                             ndcg_at_k=ndcg_at_k,
                                             map_at_k=map_at_k)
     
-    if args.colbert_rerank:
-        rerank_metrics = calculate_metrics(queries_result_list=rerank_only_pidqids_results,
+    if args.colbert_rerank or args.ce_rerank:
+        rerank_metrics = calculate_metrics(queries_result_list=rerank_only_pidqids_results if not is_corpus_chunked else rerank_only_pidqids_results_chunk,
                                             queries=dev_queries,
                                             relevant_docs=dev_rel_docs,
                                             mrr_at_k=mrr_at_k,
@@ -240,6 +294,15 @@ if __name__ == "__main__":
                 fOut.write(f"Hybrid search + Colbert rerank:\n")
             else:
                 fOut.write(f"Colbert rerank:\n")
+            for key, value in rerank_metrics.items():
+                fOut.write(f"\t{key}: {value}\n")
+                
+        if args.ce_rerank:
+            if args.bm25_hybrid:
+                fOut.write(f"Hybrid search + Cross-encoder rerank:\n")
+            else:
+                fOut.write(f"Cross-encoder rerank:\n")
+            fOut.write(f"Cross-encoder model: {args.ce_rerank_model}\n")
             for key, value in rerank_metrics.items():
                 fOut.write(f"\t{key}: {value}\n")
                 

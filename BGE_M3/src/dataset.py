@@ -171,27 +171,39 @@ class LawsTrainDataset(Dataset):
             else:
                 return batch_size
         elif train_group_size == 2:
-            # 40GB
+            # # 40GB
+            # if 'len-0-512.jsonl' in file:
+            #     return 86
+            # elif 'len-512-1024.jsonl' in file:
+            #     return 56
+            # elif 'len-1024-2048.jsonl' in file:
+            #     return 24
+            # elif 'len-2048-3072.jsonl' in file:
+            #     return 16
+            # elif 'len-3072-4096.jsonl' in file:
+            #     return 10
+            # elif 'len-4096-5120.jsonl' in file:
+            #     return 8
+            # elif 'len-5120-6144.jsonl' in file:
+            #     return 8
+            # elif 'len-6144-7168.jsonl' in file:
+            #     return 8
+            # elif 'len-7168-inf.jsonl' in file:
+            #     return 8
+            # else:
+            #     return batch_size
+            
             if 'len-0-512.jsonl' in file:
-                return 86
+                return 88
             elif 'len-512-1024.jsonl' in file:
-                return 56
+                return 58
             elif 'len-1024-2048.jsonl' in file:
                 return 24
-            elif 'len-2048-3072.jsonl' in file:
+            elif 'len-2048-inf.jsonl' in file:
                 return 16
-            elif 'len-3072-4096.jsonl' in file:
-                return 10
-            elif 'len-4096-5120.jsonl' in file:
-                return 8
-            elif 'len-5120-6144.jsonl' in file:
-                return 8
-            elif 'len-6144-7168.jsonl' in file:
-                return 8
-            elif 'len-7168-inf.jsonl' in file:
-                return 8
             else:
                 return batch_size
+            
         elif train_group_size == 1:
             # 40GB
             if 'len-0-512.jsonl' in file:

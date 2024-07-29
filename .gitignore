@@ -1,7 +1,4 @@
-# Custom gitignore for Python projects
-data/*
-saved_models/*
-saved_embeddings/*
+test.ipynb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
